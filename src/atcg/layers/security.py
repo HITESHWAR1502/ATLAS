@@ -200,7 +200,8 @@ Example: "loginUser [OWASP A03] should reject SQL injection in email field"
 
             # Run the standard generation chain
             result = await super().execute(target_state)
-            test_output = result.get("test_output", {})
+            layer_outputs_dict = result.get("layer_outputs", {})
+            test_output = next(iter(layer_outputs_dict.values()), {})
             all_test_outputs.append(test_output)
 
             # Extract security findings from quality flags

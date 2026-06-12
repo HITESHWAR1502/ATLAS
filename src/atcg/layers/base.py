@@ -536,7 +536,8 @@ class BaseLayerAgent(ABC):
             f"(confidence={test_output.get('confidence', 0):.2f})"
         )
 
+        output_key = f"{target_id}_{layer_name}"
         return {
-            "layer_outputs": {layer_name: test_output},
+            "layer_outputs": {output_key: test_output},
             "neon_writes_queue": [neon_write],
         }

@@ -33,14 +33,20 @@ def m5_join(state: ATCGState) -> ATCGState:
     all_quality_flags: list[str] = []
     all_imports: dict[str, list[str]] = {}
 
-    for layer, test_output in merged_layer_outputs.items():
+    for output_key, test_output in merged_layer_outputs.items():
         # Collect quality flags
         all_quality_flags.extend(test_output.get("quality_flags", []))
 
         # Track imports for conflict detection
         test_code = test_output.get("test_code", "")
         imports = _extract_imports(test_code)
-        all_imports[layer] = imports
+        layer = test_output.get("active_layer", "UNKNOWN")
+        from enum import Enum
+        if isinstance(layer, Enum):
+            layer = layer.value
+        elif not isinstance(layer, str):
+            layer = str(layer)
+        all_imports[layer] = all_imports.get(layer, []) + imports
 
     for neon_write in neon_writes_queue:
         if neon_write:

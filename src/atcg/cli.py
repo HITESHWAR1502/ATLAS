@@ -224,8 +224,15 @@ def _generate_markdown_report(state: dict, path: Path) -> None:
     layer_outputs = state.get("layer_outputs", {})
     if layer_outputs:
         md.append("## Layer Results")
-        for layer, output in layer_outputs.items():
-            md.append(f"### {layer} - {output.get('target_id', 'Unknown')}")
+        for output_key, output in layer_outputs.items():
+            layer = output.get("active_layer", "Unknown")
+            from enum import Enum
+            if isinstance(layer, Enum):
+                layer = layer.value
+            elif not isinstance(layer, str):
+                layer = str(layer)
+            target_id = output.get("target_id", "Unknown")
+            md.append(f"### {layer} - {target_id}")
             md.append(f"- **Confidence:** {output.get('confidence', 0):.0%}")
             
             # Print explicit errors if any

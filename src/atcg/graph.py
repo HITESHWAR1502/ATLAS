@@ -12,6 +12,8 @@ import uuid
 
 from langgraph.graph import END, StateGraph
 
+from langchain_core.messages import RemoveMessage
+
 from atcg.config import ATCGConfig
 from atcg.db.connection import NeonConnection
 from atcg.nodes.m0_git_diff import m0_git_diff_filter
@@ -207,13 +209,17 @@ def task_dispatcher(state: ATCGState) -> ATCGState:
 
     task = queue.pop(0)
     logger.info(f"DISPATCHER: Popping task for {task['layer']} targeting {task['target_id']}")
+    
+    # Clear previous messages so the LLM doesn't reuse test code from the previous function
+    clear_msgs = [RemoveMessage(id=m.id) for m in state.get("messages", []) if hasattr(m, "id") and m.id]
+    
     return {
         **state,
         "target_id": task["target_id"],
         "active_layer": task["layer"],
         "target_context": task["target_context"],
         "attempt": 1,
-        "messages": [],
+        "messages": clear_msgs,
         "execution_queue": queue,
     }
 

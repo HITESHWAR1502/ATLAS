@@ -36,7 +36,13 @@ def m6_validator(state: ATCGState) -> ATCGState:
     layer_verdicts: dict[str, str] = {}
 
     # ── Validate each layer's output ─────────────────────────────────────────
-    for layer, output in layer_outputs.items():
+    for output_key, output in layer_outputs.items():
+        layer = output.get("active_layer", "UNKNOWN")
+        from enum import Enum
+        if isinstance(layer, Enum):
+            layer = layer.value
+        elif not isinstance(layer, str):
+            layer = str(layer)
         issues = _validate_layer_output(output, layer, language)
         if issues:
             all_issues.extend(issues)

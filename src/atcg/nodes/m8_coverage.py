@@ -37,7 +37,7 @@ async def m8_coverage_runner(state: ATCGState) -> ATCGState:
     }
 
     # ── Write test files to disk ─────────────────────────────────────────────
-    for layer, output in layer_outputs.items():
+    for output_key, output in layer_outputs.items():
         test_code = output.get("test_code", "")
         file_path = output.get("file_path", "")
 

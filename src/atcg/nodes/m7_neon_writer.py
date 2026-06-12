@@ -44,7 +44,13 @@ async def m7_neon_writer(state: ATCGState, db: NeonConnection) -> ATCGState:
 
     # If no batch, try individual layer outputs
     if not batch:
-        for layer, output in layer_outputs.items():
+        for output_key, output in layer_outputs.items():
+            layer = output.get("active_layer", "UNKNOWN")
+            from enum import Enum
+            if isinstance(layer, Enum):
+                layer = layer.value
+            elif not isinstance(layer, str):
+                layer = str(layer)
             try:
                 payload = {
                     "run_id": run_id,
