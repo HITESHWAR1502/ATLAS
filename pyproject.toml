@@ -3,48 +3,40 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "atcg"
+name = "atlas"
 version = "3.0.0"
-description = "Automated Test Case Generator — Multi-Agent LangGraph Pipeline with 5-Layer Test Generation"
-readme = "README.md"
+description = "Automated Test Case Generator - Multi-Agent LangGraph Pipeline with 5-Layer Test Generation"
+readme = "AGENTIC_AI.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
-authors = [{ name = "ATCG Team" }]
+authors = [{ name = "ATLAS Team" }]
 
 dependencies = [
-    # ── LangGraph + LangChain Core ──────────────────────────────────────
+    # LangGraph + LangChain Core
     "langgraph>=0.2.60",
-    "langgraph-checkpoint-postgres>=2.0.0",
     "langchain-core>=0.3.0",
     "langchain-google-genai>=2.1.0",
     "langchain-groq>=0.1.0",
 
-    # ── Neon / Postgres ─────────────────────────────────────────────────
-    "psycopg[binary]>=3.2.0",
-    "asyncpg>=0.30.0",
-
-    # ── AST Parsing ─────────────────────────────────────────────────────
+    # AST parsing
     "tree-sitter>=0.23.0",
     "tree-sitter-python>=0.23.0",
     "tree-sitter-javascript>=0.23.0",
     "tree-sitter-typescript>=0.23.0",
     "tree-sitter-java>=0.23.0",
 
-    # ── RAG & Embeddings ────────────────────────────────────────────────
-    "pgvector>=0.3.0",
-
-    # ── Git Integration ─────────────────────────────────────────────────
+    # Git integration
     "gitpython>=3.1.0",
 
-    # ── Data Validation ─────────────────────────────────────────────────
+    # Data validation
     "pydantic>=2.9.0",
 
-    # ── CLI & Output ────────────────────────────────────────────────────
+    # CLI and output
     "click>=8.1.0",
     "rich>=13.9.0",
     "InquirerPy>=0.3.4",
 
-    # ── Environment ─────────────────────────────────────────────────────
+    # Environment
     "python-dotenv>=1.0.0",
 ]
 
@@ -58,10 +50,10 @@ dev = [
 ]
 
 [project.scripts]
-atcg = "atcg.cli:main"
+atlas = "atlas.cli:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/atcg"]
+packages = ["src/atlas"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -1,1 +1,1 @@
-"""ATCG Test Suite."""
+"""ATLAS Test Suite."""
