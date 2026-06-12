@@ -31,11 +31,13 @@ class RAGEmbedder:
 
     async def embed_text(self, text: str) -> list[float]:
         """Generate an embedding vector for a text string."""
-        return await self._embeddings.aembed_query(text)
+        embedding = await self._embeddings.aembed_query(text)
+        return embedding[:768]  # Force exact 768 dimensions for pgvector schema
 
     async def embed_texts(self, texts: list[str]) -> list[list[float]]:
         """Generate embeddings for multiple texts."""
-        return await self._embeddings.aembed_documents(texts)
+        embeddings = await self._embeddings.aembed_documents(texts)
+        return [emb[:768] for emb in embeddings]  # Force exact 768 dimensions
 
     async def store_embedding(
         self,

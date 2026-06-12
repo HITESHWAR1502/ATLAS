@@ -12,13 +12,39 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Any
 
+from langgraph.prebuilt import create_react_agent
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.tools import tool
 
 from atcg.config import ATCGConfig
 from atcg.state import ATCGState, TestLayer
+from atcg.llm_router import get_llm
+import subprocess
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+@tool
+def run_test(test_code: str, language: str = "python") -> str:
+    """Executes the provided test code and returns the output (stdout/stderr). Use this to verify test code before returning it."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_path = Path(temp_dir)
+        test_file = temp_path / "test_interactive.py"
+        test_file.write_text(test_code, encoding="utf-8")
+        try:
+            result = subprocess.run(["pytest", str(test_file), "-v"], capture_output=True, text=True, timeout=15)
+            return f"Exit code {result.returncode}:\n{result.stdout}\n{result.stderr}"
+        except Exception as e:
+            return f"Execution failed: {str(e)}"
+
+@tool
+def read_source_file(filepath: str) -> str:
+    """Reads and returns the contents of a source file. Use this to inspect project files."""
+    try:
+        return Path(filepath).read_text(encoding="utf-8")
+    except Exception as e:
+        return f"Failed to read {filepath}: {str(e)}"
 
 
 class BaseLayerAgent(ABC):
@@ -37,11 +63,15 @@ class BaseLayerAgent(ABC):
 
     def __init__(self, config: ATCGConfig) -> None:
         self._config = config
-        self._llm = ChatGoogleGenerativeAI(
-            model=config.llm.model,
-            google_api_key=config.llm.api_key,
-            temperature=config.llm.temperature,
-            max_output_tokens=config.llm.max_output_tokens,
+        self._llm = get_llm(config, tool_calling=True)
+        # We deliberately remove run_test from tools. 
+        # M6 handles execution + feedback. Providing run_test to M5 causes Groq parsing errors (tool_use_failed)
+        self._tools = [read_source_file]
+        
+        self._agent_executor = create_react_agent(
+            self._llm, 
+            tools=self._tools, 
+            prompt=self.system_prompt
         )
 
     # ── Abstract properties (override per layer) ─────────────────────────────
@@ -192,15 +222,34 @@ class BaseLayerAgent(ABC):
             target_id=target_id,
         )
 
-        # Invoke LLM
-        messages = [
-            SystemMessage(content=self.system_prompt),
-            HumanMessage(content=user_prompt),
-        ]
-
+        # Manage Conversational Memory
+        state_messages = state.get("messages", [])
+        
+        if not state_messages:
+            # First attempt: add system + user prompt
+            state_messages.append(SystemMessage(content=self.system_prompt))
+            state_messages.append(HumanMessage(content=user_prompt))
+        elif state.get("attempt", 1) > 1 and history_context.get("rejection_feedback"):
+            # Retry attempt: add feedback
+            feedback = history_context.get("rejection_feedback")
+            error_str = "\n".join([f["error"] for f in feedback.get("failures", [])])
+            state_messages.append(HumanMessage(content=f"Execution Failed:\n{error_str}\n\nPlease fix the test code."))
+            
         try:
-            response = await self._llm.ainvoke(messages)
-            raw_output = response.content
+            response = await self._agent_executor.ainvoke({"messages": state_messages})
+            # create_react_agent returns the full updated state containing all messages
+            final_message = response["messages"][-1]
+            raw_output = final_message.content
+            
+            # Handle LangChain Google GenAI returning a list of dicts instead of string
+            if isinstance(raw_output, list):
+                text_parts = [part["text"] for part in raw_output if isinstance(part, dict) and "text" in part]
+                raw_output = "\n".join(text_parts) if text_parts else str(raw_output)
+            elif not isinstance(raw_output, str):
+                raw_output = str(raw_output)
+            
+            # Save the full message history to state
+            state["messages"] = response["messages"]
 
             # Parse the JSON output from LLM response
             test_output = self._parse_llm_output(raw_output, state)
@@ -301,12 +350,13 @@ class BaseLayerAgent(ABC):
             '  "mocks_required": [',
             '    {"module": "<path>", "mock_type": "<type>", "from_registry": true|false}',
             '  ],',
-            '  "test_code": "<complete, valid, executable test file>",',
             '  "quality_flags": ["<flag>", ...]',
             "}",
             "```",
             "",
-            "CRITICAL: The test_code must be a COMPLETE, VALID, EXECUTABLE test file.",
+            "## Test Code Generation",
+            "AFTER the JSON block, provide the complete, valid, executable test file in a standard markdown code block (e.g. ```python).",
+            "CRITICAL: Do NOT put the test_code inside the JSON object! It must be completely outside the JSON block.",
             "Include all imports, all setup/teardown, and all test cases.",
             "Use AAA (Arrange-Act-Assert) structure for every test.",
         ])
@@ -336,6 +386,24 @@ class BaseLayerAgent(ABC):
             parsed = json.loads(json_str)
             parsed["target_id"] = state.get("target_id", "unknown")
             parsed["active_layer"] = self.layer.value
+
+            # Extract test code from markdown blocks outside the JSON
+            if "test_code" not in parsed:
+                test_code = ""
+                if "```python" in raw_output:
+                    start = raw_output.index("```python") + 9
+                    end = raw_output.rindex("```")
+                    test_code = raw_output[start:end].strip()
+                elif "```typescript" in raw_output:
+                    start = raw_output.index("```typescript") + 13
+                    end = raw_output.rindex("```")
+                    test_code = raw_output[start:end].strip()
+                elif "```javascript" in raw_output:
+                    start = raw_output.index("```javascript") + 13
+                    end = raw_output.rindex("```")
+                    test_code = raw_output[start:end].strip()
+                parsed["test_code"] = test_code
+
             return parsed
         except json.JSONDecodeError:
             # Fallback: extract test code from response and build minimal output
@@ -363,6 +431,23 @@ class BaseLayerAgent(ABC):
             start = raw_output.index("```javascript") + 13
             end = raw_output.rindex("```")
             test_code = raw_output[start:end].strip()
+        elif '"test_code"' in raw_output:
+            import re
+            # Extract everything between "test_code": " and the next JSON key or end of JSON
+            match = re.search(r'"test_code"\s*:\s*"(.*?)"\s*,\s*"\w+"\s*:', raw_output, re.DOTALL)
+            if match:
+                # Decode the partially escaped broken JSON string
+                extracted = match.group(1)
+                # Only unescape if it looks like it was escaped
+                if "\\n" in extracted or '\\"' in extracted:
+                    extracted = extracted.replace('\\n', '\n').replace('\\"', '"').replace('\\\\', '\\')
+                test_code = extracted.strip()
+            else:
+                # Prevent returning raw JSON as python code
+                test_code = "# Failed to extract test code from malformed JSON fallback.\n"
+        else:
+            # Prevent returning raw JSON as python code
+            test_code = "# LLM generation failed to produce test_code block.\n"
 
         target_id = state.get("target_id", "unknown")
         language = state.get("project_context", {}).get("language", "python")

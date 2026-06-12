@@ -10,8 +10,6 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from langgraph.types import Send
-
 from atcg.state import ATCGState, FunctionClassification, TestLayer
 
 logger = logging.getLogger(__name__)
@@ -128,62 +126,33 @@ def m4_test_planner(state: ATCGState) -> ATCGState:
         "test_framework": project_context.get("test_framework", "pytest"),
     }
 
+    # Build execution queue for sequential processing
+    selected_layers = state.get("selected_layers", [])
+    execution_queue = []
+    
+    for target in targets:
+        for layer in selected_layers:
+            # Force add the selected layer to active_layers so it's tracked
+            if layer not in target["active_layers"]:
+                target["active_layers"].append(layer)
+                
+            execution_queue.append({
+                "target_id": target["id"],
+                "layer": layer,
+                "target_context": target["context"],
+            })
+
     logger.info(
         f"M4: Planned {len(targets)} targets → "
-        f"{total_dispatches} layer dispatches"
+        f"{total_dispatches} active layer dispatches."
     )
-
-    # Log layer distribution
-    layer_counts: dict[str, int] = {}
-    for t in targets:
-        for layer in t["active_layers"]:
-            layer_counts[layer] = layer_counts.get(layer, 0) + 1
-    for layer, count in sorted(layer_counts.items()):
-        logger.info(f"  {layer}: {count} targets")
+    logger.info(f"M4: Queued {len(execution_queue)} sequential tasks based on selected layers: {selected_layers}")
 
     return {
         **state,
         "test_plan": test_plan,
+        "execution_queue": execution_queue,
     }
 
 
-def route_to_layers(state: ATCGState) -> list[Send]:
-    """
-    LangGraph routing function — dispatches parallel Send() calls.
 
-    Called by the conditional edge after M4 to fan out to layer agents.
-    Each function × layer combination gets its own sub-state.
-
-    Per spec (lines 654–669):
-        for function_target in state.test_plan["targets"]:
-            for layer in function_target["active_layers"]:
-                sends.append(Send(
-                    node  = f"M5_{layer}",
-                    state = { ...state, target_id, active_layer, target_context }
-                ))
-    """
-    test_plan = state.get("test_plan", {})
-    targets = test_plan.get("targets", [])
-
-    sends: list[Send] = []
-
-    for target in targets:
-        for layer in target["active_layers"]:
-            # SECURITY runs after JOIN, not in parallel fan-out
-            if layer == TestLayer.SECURITY.value:
-                continue
-
-            node_name = f"m5_{layer.lower()}"
-
-            sub_state: dict[str, Any] = {
-                **state,
-                "target_id": target["id"],
-                "active_layer": layer,
-                "target_context": target["context"],
-                "attempt": 1,
-            }
-
-            sends.append(Send(node_name, sub_state))
-
-    logger.info(f"M4 Router: Dispatching {len(sends)} parallel layer tasks")
-    return sends

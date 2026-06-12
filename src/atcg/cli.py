@@ -25,6 +25,7 @@ from rich.logging import RichHandler
 from rich.panel import Panel
 from rich.table import Table
 from rich.tree import Tree
+from rich.markdown import Markdown
 
 from atcg import __version__
 from atcg.config import ATCGConfig
@@ -68,13 +69,10 @@ def main(ctx: click.Context, log_level: str) -> None:
 
 
 @main.command()
-@click.argument("repo_path", type=click.Path(exists=True), default=".")
-@click.option("--diff", is_flag=True, help="Only process git-changed files")
-@click.option("--target", help="Target specific function (module.function_name)")
 @click.option("--env", type=click.Path(), help="Path to .env file")
 @click.pass_context
-def run(ctx: click.Context, repo_path: str, diff: bool, target: str | None, env: str | None) -> None:
-    """Run the ATCG pipeline on a repository."""
+def run(ctx: click.Context, env: str | None) -> None:
+    """Run the ATCG pipeline interactively."""
     console.print(Panel.fit(
         f"[bold cyan]🧪 ATCG v{__version__}[/bold cyan]\n"
         f"[dim]Automated Test Case Generator — 5-Layer Pipeline[/dim]",
@@ -82,12 +80,36 @@ def run(ctx: click.Context, repo_path: str, diff: bool, target: str | None, env:
     ))
 
     try:
+        from InquirerPy import inquirer
+        from InquirerPy.base.control import Choice
+        
+        repo_path = inquirer.filepath(
+            message="Enter the target file path or repository path:",
+            default="./",
+            validate=lambda result: len(result) > 0,
+        ).execute()
+        
+        selected_layers = inquirer.checkbox(
+            message="Select the testing layers to conduct (+ to select/deselect, Enter to confirm):",
+            choices=[
+                Choice("UNIT", name="Unit Testing", enabled=True),
+                Choice("INTEGRATION", name="Integration Testing", enabled=True),
+                Choice("FUNCTIONAL", name="Functional Testing", enabled=True),
+                Choice("PERFORMANCE", name="Performance Testing", enabled=True),
+                Choice("SECURITY", name="Security Testing", enabled=True),
+            ],
+            validate=lambda result: len(result) >= 1,
+            invalid_message="Please select at least one layer.",
+            instruction="(Use <space> or <+> to select, <enter> to confirm)",
+            pointer="+",
+        ).execute()
+        
         config = ATCGConfig.from_env(env)
         warnings = config.validate()
         for w in warnings:
             console.print(f"[yellow]⚠ {w}[/yellow]")
 
-        asyncio.run(_run_pipeline(config, repo_path, diff, target))
+        asyncio.run(_run_pipeline(config, repo_path, selected_layers))
 
     except ValueError as e:
         console.print(f"[red]Configuration error: {e}[/red]")
@@ -102,7 +124,7 @@ def run(ctx: click.Context, repo_path: str, diff: bool, target: str | None, env:
 
 
 async def _run_pipeline(
-    config: ATCGConfig, repo_path: str, diff: bool, target: str | None
+    config: ATCGConfig, repo_path: str, selected_layers: list[str]
 ) -> None:
     """Execute the ATCG pipeline."""
     from atcg.graph import build_graph, create_initial_state
@@ -123,7 +145,7 @@ async def _run_pipeline(
     compiled = graph.compile()
 
     # Create initial state
-    initial_state = create_initial_state(str(Path(repo_path).resolve()))
+    initial_state = create_initial_state(str(Path(repo_path).resolve()), selected_layers)
 
     # Display pipeline info
     _display_pipeline_info(str(Path(repo_path).resolve()))
@@ -145,15 +167,12 @@ def _display_pipeline_info(repo_path: str) -> None:
     tree.add("[dim]M1:[/dim] Ingestion + Fixture Registry")
     tree.add("[dim]M2:[/dim] AST Parser")
     tree.add("[dim]M3:[/dim] RAG Embedder")
-    tree.add("[dim]M4:[/dim] Test Planner + Layer Router")
-    fan = tree.add("[bold cyan]⚡ Parallel Fan-out[/bold cyan]")
-    fan.add("M5-UNIT")
-    fan.add("M5-INTEGRATION")
-    fan.add("M5-FUNCTIONAL")
-    fan.add("M5-PERFORMANCE")
-    tree.add("[dim]JOIN:[/dim] Aggregate Results")
-    tree.add("[bold red]M5-OWASP:[/bold red] Security Overlay")
-    tree.add("[dim]M6:[/dim] Validator")
+    tree.add("[dim]M4:[/dim] Test Planner + Task Dispatcher")
+    
+    seq = tree.add("[bold cyan]🔄 Sequential Execution Loop[/bold cyan]")
+    seq.add("M5 Layer Agent")
+    seq.add("M6 Test Executor (Feedback Loop)")
+    
     tree.add("[dim]M7:[/dim] Neon Writer")
     tree.add("[dim]M8:[/dim] Coverage Runner")
     console.print(tree)
@@ -161,67 +180,88 @@ def _display_pipeline_info(repo_path: str) -> None:
 
 
 def _display_results(state: dict) -> None:
-    """Display pipeline results."""
+    """Display minimal pipeline results and generate a detailed markdown report."""
     console.print("\n" + "=" * 60)
     console.print("[bold green]✅ Pipeline Complete[/bold green]\n")
 
-    # Test plan summary
+    # Generate Markdown Report
+    report_path = Path("tests/atlas_test_report.md")
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    _generate_markdown_report(state, report_path)
+
+    # Minimal terminal output
     test_plan = state.get("test_plan", {})
-    console.print(f"Functions analyzed: {test_plan.get('total_functions', 0)}")
-    console.print(f"Layer dispatches:   {test_plan.get('total_layer_dispatches', 0)}")
-
-    # Verdict
     verdict = state.get("verdict", "N/A")
-    verdict_color = {
-        "PASS": "green",
-        "RETRY": "yellow",
-        "ESCALATE": "red",
-    }.get(verdict, "white")
-    console.print(f"Verdict:            [{verdict_color}]{verdict}[/{verdict_color}]")
-
-    # Layer outputs
-    layer_outputs = state.get("layer_outputs", {})
-    if layer_outputs:
-        table = Table(title="Layer Results")
-        table.add_column("Layer", style="cyan")
-        table.add_column("Target", style="white")
-        table.add_column("Confidence", justify="center")
-        table.add_column("Tests", justify="center")
-
-        for layer, output in layer_outputs.items():
-            confidence = output.get("confidence", 0)
-            conf_color = "green" if confidence >= 0.8 else "yellow" if confidence >= 0.5 else "red"
-            test_code = output.get("test_code", "")
-            test_count = test_code.count("def test_") or test_code.count("it(")
-
-            table.add_row(
-                layer,
-                output.get("target_id", ""),
-                f"[{conf_color}]{confidence:.0%}[/{conf_color}]",
-                str(test_count),
-            )
-
-        console.print(table)
-
-    # Security findings
+    verdict_color = {"PASS": "green", "RETRY": "yellow", "ESCALATE": "red"}.get(verdict, "white")
+    
+    console.print(f"Total Functions Analyzed: {test_plan.get('total_functions', 0)}")
+    console.print(f"Selected Layers: {', '.join(state.get('selected_layers', []))}")
+    console.print(f"Final Verdict: [{verdict_color}]{verdict}[/{verdict_color}]")
+    
     findings = state.get("security_findings", [])
     if findings:
-        console.print(f"\n[bold red]🔴 Security Findings: {len(findings)}[/bold red]")
-        for f in findings:
-            console.print(
-                f"  [{f.get('severity', 'HIGH')}] {f.get('owasp_category')} — "
-                f"{f.get('function_name')}: {f.get('verdict')}"
-            )
+        console.print(f"[bold red]Security Vulnerabilities Found: {len(findings)}[/bold red]")
+        
+    console.print(f"\n[bold cyan]Detailed report generated at: {report_path.absolute()}[/bold cyan]")
+    console.print("\n" + "=" * 60)
+    console.print("\n[bold]--- Final AI Output ---[/bold]\n")
+    console.print(Markdown(report_path.read_text(encoding="utf-8")))
 
-    # Coverage
+def _generate_markdown_report(state: dict, path: Path) -> None:
+    """Generates a comprehensive markdown report."""
+    md = [
+        "# ATLAS Autonomous Test Generation Report",
+        f"**Verdict:** {state.get('verdict', 'N/A')}",
+        "",
+        "## Summary",
+    ]
+    
+    test_plan = state.get("test_plan", {})
+    md.append(f"- **Functions Analyzed:** {test_plan.get('total_functions', 0)}")
+    md.append(f"- **Selected Layers:** {', '.join(state.get('selected_layers', []))}")
+    md.append("")
+    
+    layer_outputs = state.get("layer_outputs", {})
+    if layer_outputs:
+        md.append("## Layer Results")
+        for layer, output in layer_outputs.items():
+            md.append(f"### {layer} - {output.get('target_id', 'Unknown')}")
+            md.append(f"- **Confidence:** {output.get('confidence', 0):.0%}")
+            
+            # Print explicit errors if any
+            rejection_feedback = state.get("rejection_feedback")
+            if rejection_feedback and rejection_feedback.get("layer") == layer:
+                md.append("\n#### 🚨 Execution Failures")
+                md.append("The following errors were encountered during test execution:")
+                for f in rejection_feedback.get("failures", []):
+                    md.append(f"```text\n{f.get('error')}\n```")
+                if rejection_feedback.get("raw_output"):
+                    md.append("<details><summary>Raw Pytest Output</summary>\n")
+                    md.append(f"```text\n{rejection_feedback.get('raw_output')}\n```\n</details>\n")
+                    
+            test_code = output.get("test_code", "")
+            if test_code:
+                md.append("\n#### Generated Test Code")
+                md.append(f"```python\n{test_code}\n```\n")
+    
+    findings = state.get("security_findings", [])
+    if findings:
+        md.append("## Security Findings")
+        for f in findings:
+            md.append(f"### {f.get('owasp_category')} in `{f.get('function_name')}`")
+            md.append(f"- **Severity:** {f.get('severity', 'HIGH')}")
+            md.append(f"- **Verdict:** {f.get('verdict')}")
+            md.append(f"- **Recommendation:** {f.get('recommendation', 'N/A')}")
+            md.append("")
+            
     coverage = state.get("coverage_results", {})
     files_written = coverage.get("files_written", []) if coverage else []
     if files_written:
-        console.print(f"\n[bold]📁 Test Files Written: {len(files_written)}[/bold]")
+        md.append("## Files Written")
         for f in files_written:
-            console.print(f"  [dim]{f}[/dim]")
-
-    console.print("\n" + "=" * 60)
+            md.append(f"- `{f}`")
+            
+    path.write_text("\n".join(md), encoding="utf-8")
 
 
 # ── INIT-DB command ──────────────────────────────────────────────────────────

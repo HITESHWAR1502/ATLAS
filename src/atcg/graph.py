@@ -18,7 +18,7 @@ from atcg.nodes.m0_git_diff import m0_git_diff_filter
 from atcg.nodes.m1_ingestion import m1_ingestion
 from atcg.nodes.m2_ast_parser import m2_ast_parser
 from atcg.nodes.m3_rag_embedder import m3_rag_embedder
-from atcg.nodes.m4_test_planner import m4_test_planner, route_to_layers
+from atcg.nodes.m4_test_planner import m4_test_planner
 from atcg.nodes.m5_agents import (
     m5_functional,
     m5_integration,
@@ -28,7 +28,7 @@ from atcg.nodes.m5_agents import (
 )
 from atcg.nodes.m5_join import m5_join
 from atcg.nodes.m5_owasp import m5_owasp
-from atcg.nodes.m6_validator import get_routing_verdict, m6_validator
+from atcg.nodes.m6_test_executor import get_routing_verdict, m6_test_executor
 from atcg.nodes.m7_neon_writer import m7_neon_writer
 from atcg.nodes.m8_coverage import m8_coverage_runner
 from atcg.state import ATCGState
@@ -79,8 +79,8 @@ def build_graph(config: ATCGConfig, db: NeonConnection) -> StateGraph:
     graph.add_node("m5_join", m5_join)
     graph.add_node("m5_owasp", m5_owasp)
 
-    # Validation + persistence
-    graph.add_node("m6_validator", m6_validator)
+    # Execution + Validation
+    graph.add_node("m6_test_executor", m6_test_executor)
     
     async def m7_neon_writer_node(state: ATCGState) -> ATCGState:
         return await m7_neon_writer(state, db)
@@ -88,10 +88,12 @@ def build_graph(config: ATCGConfig, db: NeonConnection) -> StateGraph:
     
     graph.add_node("m8_coverage", m8_coverage_runner)
 
+    graph.add_node("task_dispatcher", task_dispatcher)
+
     # HITL interrupt (placeholder — logs and continues)
     graph.add_node("hitl_interrupt", _hitl_interrupt)
 
-    # Retry handler (increments attempt, routes back to fan-out)
+    # Retry handler (increments attempt, routes back to current layer)
     graph.add_node("retry_handler", _retry_handler)
 
     # ── Set entry point ──────────────────────────────────────────────────────
@@ -103,31 +105,31 @@ def build_graph(config: ATCGConfig, db: NeonConnection) -> StateGraph:
     graph.add_edge("m2_ast_parser", "m3_rag_embedder")
     graph.add_edge("m3_rag_embedder", "m4_test_planner")
 
-    # ── Fan-out: M4 → parallel M5 agents via Send() ─────────────────────────
+    # ── M4 -> Task Dispatcher ────────────────────────────────────────────────
+    graph.add_edge("m4_test_planner", "task_dispatcher")
+
+    # ── Task Dispatcher -> Layer Agent (or M7 if done) ───────────────────────
     graph.add_conditional_edges(
-        "m4_test_planner",
-        route_to_layers,
-        ["m5_unit", "m5_integration", "m5_functional", "m5_performance"],
+        "task_dispatcher",
+        route_from_dispatcher,
+        ["m5_unit", "m5_integration", "m5_functional", "m5_performance", "m5_owasp", "m7_neon_writer"]
     )
 
-    # ── Fan-in: All M5 → JOIN ────────────────────────────────────────────────
-    graph.add_edge("m5_unit", "m5_join")
-    graph.add_edge("m5_integration", "m5_join")
-    graph.add_edge("m5_functional", "m5_join")
-    graph.add_edge("m5_performance", "m5_join")
-
-    # ── Post-JOIN: OWASP → Validator ─────────────────────────────────────────
-    graph.add_edge("m5_join", "m5_owasp")
-    graph.add_edge("m5_owasp", "m6_validator")
+    # ── Layer Agents -> Test Executor/Validator ──────────────────────────────
+    graph.add_edge("m5_unit", "m6_test_executor")
+    graph.add_edge("m5_integration", "m6_test_executor")
+    graph.add_edge("m5_functional", "m6_test_executor")
+    graph.add_edge("m5_performance", "m6_test_executor")
+    graph.add_edge("m5_owasp", "m6_test_executor")
 
     # ── Conditional routing from M6 ──────────────────────────────────────────
     graph.add_conditional_edges(
-        "m6_validator",
+        "m6_test_executor",
         get_routing_verdict,
         {
-            "m7_neon_writer": "m7_neon_writer",
-            "retry_handler": "retry_handler",
-            "hitl_interrupt": "hitl_interrupt",
+            "task_dispatcher": "task_dispatcher",  # If PASS
+            "retry_handler": "retry_handler",      # If RETRY
+            "hitl_interrupt": "hitl_interrupt",    # If ESCALATE
         },
     )
 
@@ -138,11 +140,11 @@ def build_graph(config: ATCGConfig, db: NeonConnection) -> StateGraph:
     # ── HITL → END (after human review, pipeline terminates) ─────────────────
     graph.add_edge("hitl_interrupt", END)
 
-    # ── Retry → back to fan-out ──────────────────────────────────────────────
+    # ── Retry → back to layer ──────────────────────────────────────────────
     graph.add_conditional_edges(
         "retry_handler",
-        route_to_layers,
-        ["m5_unit", "m5_integration", "m5_functional", "m5_performance"],
+        route_from_dispatcher,
+        ["m5_unit", "m5_integration", "m5_functional", "m5_performance", "m5_owasp"]
     )
 
     return graph
@@ -186,12 +188,54 @@ def _hitl_interrupt(state: ATCGState) -> ATCGState:
     return state
 
 
+def task_dispatcher(state: ATCGState) -> ATCGState:
+    """Pops the next task from the execution queue."""
+    queue = state.get("execution_queue", [])
+    if not queue:
+        return {"active_layer": ""}  # Signals done
+
+    import os
+    import time
+    provider = os.getenv("LLM_PROVIDER", "gemini").lower()
+    model = os.getenv("LLM_MODEL", "gemini-2.5-flash").lower()
+    
+    # Check if this isn't the very first task being popped (by checking if original queue size matches)
+    # We add a delay to respect the Gemini free tier 5 RPM limit
+    if provider == "gemini" and "2.5" in model:
+        logger.info("DISPATCHER: Applying 12-second rate limit delay for Gemini 2.5 free tier...")
+        time.sleep(12.5)
+
+    task = queue.pop(0)
+    logger.info(f"DISPATCHER: Popping task for {task['layer']} targeting {task['target_id']}")
+    return {
+        **state,
+        "target_id": task["target_id"],
+        "active_layer": task["layer"],
+        "target_context": task["target_context"],
+        "attempt": 1,
+        "messages": [],
+        "execution_queue": queue,
+    }
+
+
+def route_from_dispatcher(state: ATCGState) -> str:
+    """Routes to the correct layer agent or ends execution."""
+    active_layer = state.get("active_layer", "")
+    if not active_layer:
+        return "m7_neon_writer"
+    layer_name = active_layer.lower()
+    if layer_name == "security":
+        return "m5_owasp"
+    return f"m5_{layer_name}"
+
+
 def _retry_handler(state: ATCGState) -> ATCGState:
     """
-    Retry handler — increments attempt counter and routes back to fan-out.
+    Retry handler — increments attempt counter and loops back to current layer.
     """
     attempt = state.get("attempt", 1)
-    logger.info(f"RETRY: Attempt {attempt} → {attempt + 1}")
+    layer = state.get("active_layer", "unknown")
+    logger.info(f"RETRY {layer}: Attempt {attempt} → {attempt + 1}")
 
     return {
         **state,
@@ -199,7 +243,7 @@ def _retry_handler(state: ATCGState) -> ATCGState:
     }
 
 
-def create_initial_state(project_root: str) -> ATCGState:
+def create_initial_state(project_root: str, selected_layers: list[str] = None) -> ATCGState:
     """Create the initial state for a pipeline run."""
     run_id = str(uuid.uuid4())
     thread_id = f"atcg-{run_id[:8]}"
@@ -226,6 +270,13 @@ def create_initial_state(project_root: str) -> ATCGState:
         owasp_output=None,
         security_findings=[],
         rejection_feedback=None,
+        messages=[],
+        execution_result=None,
+        retry_count=0,
+        max_retries=3,
+        selected_layers=selected_layers or [],
+        current_layer_index=0,
+        execution_queue=[],
         neon_write={},
         coverage_results=None,
         errors=[],

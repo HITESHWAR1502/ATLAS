@@ -145,6 +145,7 @@ async def get_latest_pass_run(
 
 async def create_run(
     db: NeonConnection,
+    run_id: str,
     thread_id: str,
     project_name: str,
     language: str,
@@ -156,12 +157,12 @@ async def create_run(
     return await db.execute_one(
         """
         INSERT INTO atcg_runs
-            (thread_id, project_name, language, test_framework,
+            (run_id, thread_id, project_name, language, test_framework,
              targets_count, layers_dispatched)
-        VALUES (%s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
         RETURNING *
         """,
-        (thread_id, project_name, language, test_framework,
+        (run_id, thread_id, project_name, language, test_framework,
          targets_count, layers_dispatched),
     )
 
@@ -200,10 +201,10 @@ async def write_layer_run(
     columns = list(payload.keys())
     placeholders = ["%s"] * len(columns)
 
-    # Convert complex types to JSON strings
+    # Convert complex types to JSON strings (but leave lists for native PG array mapping)
     values = []
     for key, value in payload.items():
-        if isinstance(value, (dict, list)):
+        if isinstance(value, dict):
             values.append(json.dumps(value))
         else:
             values.append(value)

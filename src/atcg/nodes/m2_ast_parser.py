@@ -145,37 +145,60 @@ def _estimate_complexity(source: str) -> int:
 
 
 def _extract_functions_python(source: str, file_path: str) -> list[dict[str, Any]]:
-    """Extract functions from Python source using regex-based parsing."""
-    import re
+    """Extract functions from Python source using tree-sitter."""
+    import tree_sitter_python as tspython
+    from tree_sitter import Language, Parser
 
+    PY_LANGUAGE = Language(tspython.language())
+    parser = Parser(PY_LANGUAGE)
+    tree = parser.parse(bytes(source, "utf8"))
+    
     functions: list[dict[str, Any]] = []
-    # Match function definitions safely
-    pattern = re.compile(
-        r'^(\s*)(async\s+)?def\s+(\w+)\s*\(([^)]*)\)(\s*->\s*([^:]+))?\s*:',
-        re.MULTILINE,
-    )
+    source_bytes = source.encode('utf-8')
+    
+    def find_functions(node, func_nodes):
+        if node.type in ["function_definition", "async_function_definition"]:
+            func_nodes.append(node)
+        for child in node.children:
+            # Skip inner classes or nested functions for now
+            if node.type == "class_definition" and child.type == "block":
+                find_functions(child, func_nodes)
+            elif node.type != "function_definition":
+                find_functions(child, func_nodes)
 
-    for match in pattern.finditer(source):
-        indent = match.group(1)
-        is_async = bool(match.group(2))
-        name = match.group(3)
-        params_str = match.group(4)
-        return_type = match.group(6)
-
+    func_nodes = []
+    find_functions(tree.root_node, func_nodes)
+    
+    for node in func_nodes:
+        is_async = node.type == "async_function_definition"
+        
+        name_node = node.child_by_field_name("name")
+        if not name_node:
+            continue
+            
+        name = source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8")
+        
         # Skip private/magic methods (except __init__)
         if name.startswith("_") and name != "__init__":
             continue
-
-        # Extract function body (up to next function at same/lesser indent)
-        start_pos = match.start()
-        func_source = _extract_function_body(source, start_pos, indent)
-
-        # Parse parameters
-        params = _parse_python_params(params_str)
-
-        # Extract decorators (lines above the def)
-        decorators = _extract_decorators(source, start_pos)
-
+            
+        params_node = node.child_by_field_name("parameters")
+        params_str = source_bytes[params_node.start_byte:params_node.end_byte].decode("utf-8") if params_node else "()"
+        
+        return_node = node.child_by_field_name("return_type")
+        return_type = source_bytes[return_node.start_byte:return_node.end_byte].decode("utf-8") if return_node else None
+        
+        func_source = source_bytes[node.start_byte:node.end_byte].decode("utf-8")
+        
+        # Simple extraction of decorators for now
+        decorators = []
+        prev = node.prev_sibling
+        while prev and prev.type == "decorator":
+            decorators.append(source_bytes[prev.start_byte:prev.end_byte].decode("utf-8"))
+            prev = prev.prev_sibling
+            
+        params = _parse_python_params(params_str[1:-1])  # Strip parens
+        
         # Classify
         classification, deps, chars = _classify_function(name, func_source, decorators, params)
 
@@ -186,9 +209,9 @@ def _extract_functions_python(source: str, file_path: str) -> list[dict[str, Any
             "name": name,
             "module_path": file_path,
             "source_code": func_source,
-            "signature": match.group(0).strip(),
+            "signature": f"{'async ' if is_async else ''}def {name}{params_str}{' -> ' + return_type if return_type else ''}:",
             "parameters": params,
-            "return_type": return_type.strip() if return_type else None,
+            "return_type": return_type,
             "decorators": decorators,
             "classification": classification.value,
             "cyclomatic_complexity": _estimate_complexity(func_source),
@@ -198,26 +221,6 @@ def _extract_functions_python(source: str, file_path: str) -> list[dict[str, Any
         })
 
     return functions
-
-
-def _extract_function_body(source: str, start_pos: int, indent: str) -> str:
-    """Extract the full function body from its start position."""
-    lines = source[start_pos:].split("\n")
-    body_lines = [lines[0]]
-    base_indent = len(indent)
-
-    for line in lines[1:]:
-        stripped = line.lstrip()
-        if not stripped:  # Empty line
-            body_lines.append(line)
-            continue
-
-        current_indent = len(line) - len(stripped)
-        if current_indent <= base_indent and stripped and not stripped.startswith("#"):
-            break
-        body_lines.append(line)
-
-    return "\n".join(body_lines)
 
 
 def _parse_python_params(params_str: str) -> list[dict[str, Any]]:

@@ -15,7 +15,7 @@ from typing import Any
 from atcg.config import ATCGConfig
 from atcg.db.connection import NeonConnection
 from atcg.db.fixtures import query_fixtures
-from atcg.db.history import get_target_history
+from atcg.db.history import create_run, get_target_history
 from atcg.state import ATCGState
 
 logger = logging.getLogger(__name__)
@@ -243,6 +243,21 @@ async def m1_ingestion(state: ATCGState, config: ATCGConfig, db: NeonConnection)
         f"M1: Detected project '{project_name}' — "
         f"lang={language}, framework={framework}, tests={test_framework}"
     )
+
+    # ── Initialize parent run in database ──────────────────────────────────────
+    try:
+        await create_run(
+            db=db,
+            run_id=state.get("run_id"),
+            thread_id=state.get("thread_id"),
+            project_name=project_name,
+            language=language,
+            test_framework=test_framework,
+            targets_count=0,
+            layers_dispatched=0,
+        )
+    except Exception as e:
+        logger.error(f"M1: Failed to initialize master run in DB: {e}")
 
     # ── Query Neon fixture registry ───────────────────────────────────────────
     # Extract dependency tags from changed files' imports

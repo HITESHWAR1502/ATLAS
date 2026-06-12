@@ -11,6 +11,8 @@ from enum import Enum
 import operator
 from typing import Annotated, Any, TypedDict
 
+from langchain_core.messages import BaseMessage
+from langgraph.graph.message import add_messages
 from pydantic import BaseModel, Field
 
 
@@ -255,6 +257,15 @@ class ATCGState(TypedDict, total=False):
 
     # ── Feedback loop ─────────────────────────────────────────────────────────
     rejection_feedback: dict[str, Any] | None
+    
+    # ── Agentic Execution (new) ───────────────────────────────────────────────
+    messages: Annotated[list[BaseMessage], add_messages]
+    execution_result: dict[str, Any] | None
+    retry_count: int
+    max_retries: int
+    selected_layers: list[str]
+    current_layer_index: int
+    execution_queue: list[dict[str, Any]]
 
     # ── Neon write payload (you populate; M7 executes) ────────────────────────
     neon_write: dict[str, Any]
