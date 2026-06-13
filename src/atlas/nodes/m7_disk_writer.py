@@ -57,7 +57,7 @@ async def m7_disk_writer(state: ATLASState) -> ATLASState:
     for target_path, content in latest_writes.items():
         # Ensure parent directories exist
         target_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         try:
             target_path.write_text(content, encoding="utf-8")
             logger.info(f"M7: Wrote test file to {target_path}")
@@ -65,6 +65,4 @@ async def m7_disk_writer(state: ATLASState) -> ATLASState:
             logger.error(f"M7: Failed to write {target_path}: {e}")
 
     # Clear queue after writing
-    return {
-        "disk_writes_queue": []
-    }
+    return {"disk_writes_queue": []}

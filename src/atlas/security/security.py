@@ -65,7 +65,7 @@ Required attack payloads:
   SQL: ["'; DROP TABLE users; --", "' OR '1'='1", "1; SELECT *"]
   NoSQL: [{"$gt": ""}, {"$where": "1==1"}]
   Command: ["../../../etc/passwd", "; rm -rf /", "| cat /etc/passwd"]
-For Neon/Postgres: assert parameterised placeholders ($1, $2), NEVER string concat
+For SQL Databases: assert parameterised placeholders ($1, ?), NEVER string concat
 
 ### [A04] INSECURE DESIGN
 - Assert rate limiting is enforced
@@ -121,7 +121,7 @@ Example: "loginUser [OWASP A03] should reject SQL injection in email field"
 - [N23] Use attack-realistic data (actual OWASP attack strings)
 """
 
-    def _get_layer_specific_prompt_additions(self, target_context: dict) -> list[str]:
+    def _get_layer_specific_prompt_additions(self, target_context: dict[str, Any]) -> list[str]:
         additions = [
             "",
             "## Security-Specific Analysis",
@@ -151,11 +151,13 @@ Example: "loginUser [OWASP A03] should reject SQL injection in email field"
             additions.append("- Function calls external services → A10 applicable")
 
         applicable_categories = sorted(set(applicable_categories))
-        additions.extend([
-            "",
-            f"## Applicable OWASP Categories: {', '.join(applicable_categories)}",
-            "Generate at least ONE test per applicable category.",
-        ])
+        additions.extend(
+            [
+                "",
+                f"## Applicable OWASP Categories: {', '.join(applicable_categories)}",
+                "Generate at least ONE test per applicable category.",
+            ]
+        )
 
         return additions
 
@@ -171,10 +173,7 @@ Example: "loginUser [OWASP A03] should reject SQL injection in email field"
         targets = test_plan.get("targets", [])
 
         # Filter to security-eligible targets
-        security_targets = [
-            t for t in targets
-            if "SECURITY" in t.get("active_layers", [])
-        ]
+        security_targets = [t for t in targets if "SECURITY" in t.get("active_layers", [])]
 
         if not security_targets:
             return {
@@ -195,16 +194,16 @@ Example: "loginUser [OWASP A03] should reject SQL injection in email field"
                 "active_layer": "SECURITY",
                 "target_context": target["context"],
                 "attempt": 1,
-            }
+            }  # type: ignore[typeddict-unknown-key]
 
             # Run the standard generation chain
             result = await super().execute(target_state)
-            
+
             # Merge layer outputs and disk writes
             layer_outputs_dict = result.get("layer_outputs", {})
             all_layer_outputs.update(layer_outputs_dict)
             all_disk_writes.extend(result.get("disk_writes_queue", []))
-            
+
             test_output = next(iter(layer_outputs_dict.values()), {})
             if test_output:
                 all_test_outputs.append(test_output)
@@ -212,15 +211,17 @@ Example: "loginUser [OWASP A03] should reject SQL injection in email field"
             # Extract security findings from quality flags
             for flag in test_output.get("quality_flags", []):
                 if "SECURITY_VULNERABILITY_DETECTED" in flag:
-                    all_findings.append({
-                        "target_id": target["id"],
-                        "function_name": target["name"],
-                        "owasp_category": _extract_owasp_category(flag),
-                        "severity": "HIGH",
-                        "test_name": flag,
-                        "test_code_snippet": "",
-                        "verdict": "VULNERABLE",
-                    })
+                    all_findings.append(
+                        {
+                            "target_id": target["id"],
+                            "function_name": target["name"],
+                            "owasp_category": _extract_owasp_category(flag),
+                            "severity": "HIGH",
+                            "test_name": flag,
+                            "test_code_snippet": "",
+                            "verdict": "VULNERABLE",
+                        }
+                    )
 
         return {
             "owasp_output": {

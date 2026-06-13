@@ -20,16 +20,32 @@ logger = logging.getLogger(__name__)
 
 # File extensions we care about per language
 SOURCE_EXTENSIONS = {
-    ".py", ".js", ".ts", ".jsx", ".tsx",
-    ".java", ".go", ".mjs", ".cjs",
+    ".py",
+    ".js",
+    ".ts",
+    ".jsx",
+    ".tsx",
+    ".java",
+    ".go",
+    ".mjs",
+    ".cjs",
 }
 
 # Patterns to exclude from analysis
 EXCLUDE_PATTERNS = {
-    "test_", "_test.", ".test.", ".spec.",
-    "__pycache__", "node_modules", ".git",
-    "dist/", "build/", ".venv/", "venv/",
-    "migrations/", "alembic/",
+    "test_",
+    "_test.",
+    ".test.",
+    ".spec.",
+    "__pycache__",
+    "node_modules",
+    ".git",
+    "dist/",
+    "build/",
+    ".venv/",
+    "venv/",
+    "migrations/",
+    "alembic/",
 }
 
 
@@ -123,11 +139,13 @@ def m0_git_diff_filter(state: ATLASState) -> ATLASState:
             if file_path and _is_source_file(file_path):
                 if (repo_path / file_path).exists() and file_path not in changed_files:
                     changed_files.append(file_path)
-                    diff_hunks.append({
-                        "file": file_path,
-                        "change_type": diff_item.change_type or "M",
-                        "hunks": _extract_diff_hunks(diff_item),
-                    })
+                    diff_hunks.append(
+                        {
+                            "file": file_path,
+                            "change_type": diff_item.change_type or "M",
+                            "hunks": _extract_diff_hunks(diff_item),
+                        }
+                    )
 
         # Process unstaged diffs
         for diff_item in unstaged_diffs:
@@ -135,21 +153,25 @@ def m0_git_diff_filter(state: ATLASState) -> ATLASState:
             if file_path and _is_source_file(file_path):
                 if (repo_path / file_path).exists() and file_path not in changed_files:
                     changed_files.append(file_path)
-                    diff_hunks.append({
-                        "file": file_path,
-                        "change_type": diff_item.change_type or "M",
-                        "hunks": _extract_diff_hunks(diff_item),
-                    })
+                    diff_hunks.append(
+                        {
+                            "file": file_path,
+                            "change_type": diff_item.change_type or "M",
+                            "hunks": _extract_diff_hunks(diff_item),
+                        }
+                    )
 
         # Process untracked source files
         for file_path in untracked:
             if _is_source_file(file_path) and file_path not in changed_files:
                 changed_files.append(file_path)
-                diff_hunks.append({
-                    "file": file_path,
-                    "change_type": "A",  # Added
-                    "hunks": [],
-                })
+                diff_hunks.append(
+                    {
+                        "file": file_path,
+                        "change_type": "A",  # Added
+                        "hunks": [],
+                    }
+                )
 
         if not changed_files:
             logger.info("No git changes detected — scanning all source files")
@@ -180,10 +202,12 @@ def _scan_all_sources(project_root: Path) -> tuple[list[str], list[dict[str, Any
             rel_path = str(file_path.relative_to(project_root))
             if _is_source_file(rel_path):
                 changed_files.append(rel_path)
-                diff_hunks.append({
-                    "file": rel_path,
-                    "change_type": "A",
-                    "hunks": [],
-                })
+                diff_hunks.append(
+                    {
+                        "file": rel_path,
+                        "change_type": "A",
+                        "hunks": [],
+                    }
+                )
 
     return changed_files, diff_hunks

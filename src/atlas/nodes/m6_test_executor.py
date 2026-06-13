@@ -8,6 +8,8 @@ the execution results and tracebacks to drive the autonomous feedback loop.
 
 from __future__ import annotations
 
+from typing import Any
+
 import logging
 import re
 import subprocess
@@ -20,6 +22,7 @@ from atlas.state import ATLASState
 logger = logging.getLogger(__name__)
 
 MAX_TRACEBACK_CHARS = 4000
+
 
 def m6_test_executor(state: ATLASState) -> ATLASState:
     """
@@ -51,20 +54,22 @@ def m6_test_executor(state: ATLASState) -> ATLASState:
     layer_outputs = state.get("layer_outputs", {})
     output_key = f"{target_file}_{active_layer}"
     output = layer_outputs.get(output_key, layer_outputs.get(active_layer, {}))
-    
+
     test_code = output.get("test_code", "")
     if not test_code:
         # Fallback to check if M5 generated it under just the layer name (e.g. "UNIT")
         fallback_output = layer_outputs.get(active_layer, {})
         test_code = fallback_output.get("test_code", "")
-        
+
     if not test_code:
         logger.warning(f"M6: No test code found for {active_layer} on {target_file}")
-        logger.warning(f"M6 Debug: Expected key {output_key}, available keys: {list(layer_outputs.keys())}")
+        logger.warning(
+            f"M6 Debug: Expected key {output_key}, available keys: {list(layer_outputs.keys())}"
+        )
         return {"verdict": "PASS"}  # Nothing to test
-        
+
     project_root = project_context.get("project_root", "")
-        
+
     # Write to temp sandbox and execute
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_path = Path(temp_dir)
@@ -72,19 +77,22 @@ def m6_test_executor(state: ATLASState) -> ATLASState:
         safe_name = target_file.replace("/", "_").replace("\\", "_").replace(".", "_")
         test_file = temp_path / f"test_{safe_name}.py"
         test_file.write_text(test_code, encoding="utf-8")
-        
+
         # Determine PYTHONPATH so it can import the actual project code
         env = None
         if project_root:
             import os
+
             env = os.environ.copy()
             # Add both project_root and project_root/src to PYTHONPATH
             src_path = str(Path(project_root) / "src")
             root_path = str(Path(project_root))
-            env["PYTHONPATH"] = src_path + os.pathsep + root_path + os.pathsep + env.get("PYTHONPATH", "")
-            
+            env["PYTHONPATH"] = (
+                src_path + os.pathsep + root_path + os.pathsep + env.get("PYTHONPATH", "")
+            )
+
         logger.info(f"M6: Executing {active_layer} test for {target_file} via pytest in sandbox")
-        
+
         try:
             # We run pytest on the temporary file
             result = subprocess.run(
@@ -92,13 +100,13 @@ def m6_test_executor(state: ATLASState) -> ATLASState:
                 capture_output=True,
                 text=True,
                 env=env,
-                timeout=30  # Timeout to prevent hanging tests
+                timeout=30,  # Timeout to prevent hanging tests
             )
-            
+
             stdout = result.stdout
             stderr = result.stderr
             return_code = result.returncode
-            
+
             if return_code == 0:
                 verdict = "PASS"
                 rejection_feedback = None
@@ -117,38 +125,40 @@ def m6_test_executor(state: ATLASState) -> ATLASState:
                     "M6: %s test FAILED. Returning deterministic retry feedback.",
                     active_layer,
                 )
-                
+
             execution_result = {
                 "status": verdict,
                 "stdout": stdout,  # Not sent back to LLM in M5, just stored in state for record
                 "stderr": stderr,
                 "layer": active_layer,
-                "attempt": state.get("attempt", 1)
+                "attempt": state.get("attempt", 1),
             }
-            
+
             return {
                 "verdict": verdict,
                 "rejection_feedback": rejection_feedback,
-                "execution_result": execution_result
+                "execution_result": execution_result,
             }
-            
+
         except subprocess.TimeoutExpired as e:
             logger.error(f"M6: Test execution timed out: {e}")
             return {
                 "verdict": "RETRY",
                 "rejection_feedback": {
                     "status": "FAIL",
-                    "issues": [{
-                        "id": "ERR_TIMEOUT",
-                        "severity": "critical",
-                        "location": "pytest_execution",
-                        "reason": "Test suite timed out (>30s)",
-                        "evidence": str(e),
-                        "recommendation": "Check for infinite loops or unmocked blocking calls"
-                    }],
-                    "metrics": {}
+                    "issues": [
+                        {
+                            "id": "ERR_TIMEOUT",
+                            "severity": "critical",
+                            "location": "pytest_execution",
+                            "reason": "Test suite timed out (>30s)",
+                            "evidence": str(e),
+                            "recommendation": "Check for infinite loops or unmocked blocking calls",
+                        }
+                    ],
+                    "metrics": {},
                 },
-                "execution_result": {"status": "TIMEOUT", "attempt": state.get("attempt", 1)}
+                "execution_result": {"status": "TIMEOUT", "attempt": state.get("attempt", 1)},
             }
         except Exception as e:
             logger.error(f"M6: Test execution failed unexpectedly: {e}")
@@ -156,17 +166,23 @@ def m6_test_executor(state: ATLASState) -> ATLASState:
                 "verdict": "ESCALATE",
                 "rejection_feedback": {
                     "status": "FAIL",
-                    "issues": [{
-                        "id": "ERR_SYSTEM",
-                        "severity": "critical",
-                        "location": "m6_test_executor",
-                        "reason": "Unexpected system exception",
-                        "evidence": str(e),
-                        "recommendation": "Check M6 environment and sandbox permissions"
-                    }],
-                    "metrics": {}
+                    "issues": [
+                        {
+                            "id": "ERR_SYSTEM",
+                            "severity": "critical",
+                            "location": "m6_test_executor",
+                            "reason": "Unexpected system exception",
+                            "evidence": str(e),
+                            "recommendation": "Check M6 environment and sandbox permissions",
+                        }
+                    ],
+                    "metrics": {},
                 },
-                "execution_result": {"status": "ERROR", "error": str(e), "attempt": state.get("attempt", 1)}
+                "execution_result": {
+                    "status": "ERROR",
+                    "error": str(e),
+                    "attempt": state.get("attempt", 1),
+                },
             }
 
 
@@ -179,7 +195,7 @@ def _extract_pytest_failure(stdout: str, stderr: str) -> str:
         if len(parts) > 1:
             failure_section = parts[1].split("short test summary info", 1)[0]
             return failure_section.strip()
-    
+
     # Fallback if standard format isn't found
     return output[-MAX_TRACEBACK_CHARS:]
 
@@ -190,7 +206,7 @@ def _build_rejection_feedback(
     stdout: str,
     stderr: str,
     failure_reason: str,
-) -> dict:
+) -> dict[str, Any]:
     """Create compact structured feedback from pytest output without another LLM call."""
     compact_failure = _compact_text(failure_reason)
     reason = _first_meaningful_failure_line(compact_failure)
@@ -287,7 +303,7 @@ def get_routing_verdict(state: ATLASState) -> str:
     verdict = state.get("verdict", "ESCALATE")
     attempt = state.get("attempt", 1)
     max_retries = state.get("max_retries", 3)
-    
+
     if verdict == "PASS":
         return "task_dispatcher"
     elif verdict == "RETRY":

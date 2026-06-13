@@ -1,9 +1,8 @@
 """
-ATLAS v3.0 - Automated Test Case Generator.
+ATLAS v1.0 - Automated Test Case Generator.
 
-Multi-agent LangGraph pipeline with five-layer test generation and an OWASP
-security overlay.
+LangGraph pipeline with 5-Layer Test Generation and OWASP security overlay.
 """
 
-__version__ = "3.0.0"
+__version__ = "1.0.0"
 __author__ = "ATLAS Team"

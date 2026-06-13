@@ -1,8 +1,8 @@
 """
-M1: Ingestion + Neon Fixture Registry Query
+M1: Ingestion / Fixture Registry Query
 
-Detects project language/framework, queries Neon for existing fixtures and
-test history, and populates the upstream context fields in the state.
+Detects project language/framework, queries for existing fixtures and
+populates the upstream context fields in the state.
 """
 
 from __future__ import annotations
@@ -10,7 +10,6 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any
 
 from atlas.config import ATLASConfig
 from atlas.state import ATLASState
@@ -185,7 +184,7 @@ def _detect_project_name(project_root: Path) -> str:
         try:
             data = json.loads(pkg_json.read_text(encoding="utf-8"))
             if "name" in data:
-                return data["name"]
+                return str(data["name"])
         except Exception:
             pass
 

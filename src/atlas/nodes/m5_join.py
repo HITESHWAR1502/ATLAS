@@ -26,10 +26,8 @@ def m5_join(state: ATLASState) -> ATLASState:
       - Passes merged state to M5-OWASP
     """
     merged_layer_outputs = state.get("layer_outputs", {})
-    neon_writes_queue = state.get("neon_writes_queue", [])
 
     shared_fixtures_to_register: list[dict[str, Any]] = []
-    all_neon_writes: list[dict[str, Any]] = []
     all_quality_flags: list[str] = []
     all_imports: dict[str, list[str]] = {}
 
@@ -42,25 +40,17 @@ def m5_join(state: ATLASState) -> ATLASState:
         imports = _extract_imports(test_code)
         layer = test_output.get("active_layer", "UNKNOWN")
         from enum import Enum
+
         if isinstance(layer, Enum):
             layer = layer.value
         elif not isinstance(layer, str):
             layer = str(layer)
         all_imports[layer] = all_imports.get(layer, []) + imports
 
-    for neon_write in neon_writes_queue:
-        if neon_write:
-            all_neon_writes.append(neon_write)
-            secondary = neon_write.get("secondary")
-            if secondary:
-                shared_fixtures_to_register.append(secondary)
-
     # Detect import conflicts across test files
     import_conflicts = _detect_import_conflicts(all_imports)
     if import_conflicts:
-        all_quality_flags.append(
-            f"IMPORT_CONFLICTS_DETECTED: {', '.join(import_conflicts)}"
-        )
+        all_quality_flags.append(f"IMPORT_CONFLICTS_DETECTED: {', '.join(import_conflicts)}")
         logger.warning(f"JOIN: Import conflicts detected: {import_conflicts}")
 
     # Deduplicate fixtures
@@ -73,10 +63,7 @@ def m5_join(state: ATLASState) -> ATLASState:
 
     return {
         "layer_outputs": merged_layer_outputs,
-        "neon_write": {
-            "batch": all_neon_writes,
-            "fixtures": unique_fixtures,
-        },
+        "fixtures": unique_fixtures,
         "quality_flags": all_quality_flags,
     }
 

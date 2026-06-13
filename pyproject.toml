@@ -4,9 +4,9 @@ build-backend = "hatchling.build"
 
 [project]
 name = "atlas"
-version = "3.0.0"
-description = "Automated Test Case Generator - Multi-Agent LangGraph Pipeline with 5-Layer Test Generation"
-readme = "AGENTIC_AI.md"
+version = "1.0.0"
+description = "Automated Test Case Generator - LangGraph Pipeline with 5-Layer Test Generation"
+readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "ATLAS Team" }]
@@ -17,6 +17,9 @@ dependencies = [
     "langchain-core>=0.3.0",
     "langchain-google-genai>=2.1.0",
     "langchain-groq>=0.1.0",
+    "langchain-openai>=0.2.0",
+    "langchain-anthropic>=0.2.0",
+    "langchain-community>=0.3.0",
 
     # AST parsing
     "tree-sitter>=0.23.0",

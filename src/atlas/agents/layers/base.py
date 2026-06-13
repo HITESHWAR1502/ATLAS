@@ -25,19 +25,24 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+
 @tool
 def run_test(test_code: str, language: str = "python") -> str:
     """Executes the provided test code and returns the output (stdout/stderr). Use this to verify test code before returning it."""
     import tempfile
+
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_path = Path(temp_dir)
         test_file = temp_path / "test_interactive.py"
         test_file.write_text(test_code, encoding="utf-8")
         try:
-            result = subprocess.run(["pytest", str(test_file), "-v"], capture_output=True, text=True, timeout=15)
+            result = subprocess.run(
+                ["pytest", str(test_file), "-v"], capture_output=True, text=True, timeout=15
+            )
             return f"Exit code {result.returncode}:\n{result.stdout}\n{result.stderr}"
         except Exception as e:
             return f"Execution failed: {str(e)}"
+
 
 @tool
 def read_source_file(filepath: str) -> str:
@@ -53,7 +58,7 @@ class BaseLayerAgent(ABC):
     Abstract base for all M5 layer agents.
 
     Implements the 6-step execution chain from the spec:
-      Step 0 — Layer identification + Neon history check
+      Step 0 — Layer identification + History check
       Step 1 — Understand the target (layer-aware)
       Step 2 — Plan the test suite (layer-governed)
       Step 3 — Generate mocks & fixtures (registry-aware)
@@ -65,14 +70,12 @@ class BaseLayerAgent(ABC):
     def __init__(self, config: ATLASConfig) -> None:
         self._config = config
         self._llm = get_llm(config, tool_calling=True)
-        # We deliberately remove run_test from tools. 
+        # We deliberately remove run_test from tools.
         # M6 handles execution + feedback. Providing run_test to M5 causes Groq parsing errors (tool_use_failed)
         self._tools = [read_source_file]
-        
+
         self._agent_executor = create_react_agent(
-            self._llm, 
-            tools=self._tools, 
-            prompt=self.system_prompt
+            self._llm, tools=self._tools, prompt=self.system_prompt
         )
 
     # ── Abstract properties (override per layer) ─────────────────────────────
@@ -147,8 +150,6 @@ class BaseLayerAgent(ABC):
         # Step 6: Emit structured output
         return self._step6_emit_output(state, test_output)
 
-
-
     async def _generate_tests(
         self, state: ATLASState, history_context: dict[str, Any]
     ) -> dict[str, Any]:
@@ -172,7 +173,7 @@ class BaseLayerAgent(ABC):
 
         # Manage Conversational Memory
         state_messages = list(state.get("messages", []))
-        
+
         if not state_messages:
             # First attempt: add system + user prompt
             state_messages.append(SystemMessage(content=self.system_prompt))
@@ -180,13 +181,11 @@ class BaseLayerAgent(ABC):
         elif state.get("attempt", 1) > 1 and history_context.get("rejection_feedback"):
             # Retry attempt: add feedback
             feedback = history_context.get("rejection_feedback")
-            issues = feedback.get("issues") or feedback.get("failures") or []
-            if issues:
-                error_str = "\n".join(
-                    issue.get("reason")
-                    or issue.get("error")
-                    or issue.get("evidence")
-                    or str(issue)
+            if feedback:
+                issues = feedback.get("issues") or feedback.get("failures") or []
+                if issues:
+                    error_str = "\n".join(
+                    issue.get("reason") or issue.get("error") or issue.get("evidence") or str(issue)
                     for issue in issues
                 )
             else:
@@ -200,20 +199,22 @@ class BaseLayerAgent(ABC):
                     )
                 )
             )
-            
+
         try:
             response = await self._agent_executor.ainvoke({"messages": state_messages})
             # create_react_agent returns the full updated state containing all messages
             final_message = response["messages"][-1]
             raw_output = final_message.content
-            
+
             # Handle LangChain Google GenAI returning a list of dicts instead of string
             if isinstance(raw_output, list):
-                text_parts = [part["text"] for part in raw_output if isinstance(part, dict) and "text" in part]
+                text_parts = [
+                    part["text"] for part in raw_output if isinstance(part, dict) and "text" in part
+                ]
                 raw_output = "\n".join(text_parts) if text_parts else str(raw_output)
             elif not isinstance(raw_output, str):
                 raw_output = str(raw_output)
-            
+
             # Save the full message history to state
             state["messages"] = response["messages"]
 
@@ -258,74 +259,82 @@ class BaseLayerAgent(ABC):
 
         # Add history context
         if history_context.get("prior_pass"):
-            prompt_parts.extend([
-                "## Prior PASS Run (baseline)",
-                "A previous test run passed for this target. Use it as a foundation if source is unchanged.",
-                "",
-            ])
+            prompt_parts.extend(
+                [
+                    "## Prior PASS Run (baseline)",
+                    "A previous test run passed for this target. Use it as a foundation if source is unchanged.",
+                    "",
+                ]
+            )
 
         if history_context.get("known_failures"):
-            prompt_parts.extend([
-                "## Known Failure Patterns (AVOID THESE)",
-                json.dumps(history_context["known_failures"], indent=2),
-                "",
-            ])
+            prompt_parts.extend(
+                [
+                    "## Known Failure Patterns (AVOID THESE)",
+                    json.dumps(history_context["known_failures"], indent=2),
+                    "",
+                ]
+            )
 
         if history_context.get("available_fixtures"):
-            prompt_parts.extend([
-                "## Available Fixtures from Registry (REUSE, DO NOT REGENERATE)",
-                json.dumps(history_context["available_fixtures"], indent=2),
-                "",
-            ])
+            prompt_parts.extend(
+                [
+                    "## Available Fixtures from Registry (REUSE, DO NOT REGENERATE)",
+                    json.dumps(history_context["available_fixtures"], indent=2),
+                    "",
+                ]
+            )
 
         if history_context.get("rejection_feedback"):
-            prompt_parts.extend([
-                "## REJECTION FEEDBACK (this is a retry — fix these issues)",
-                json.dumps(history_context["rejection_feedback"], indent=2),
-                "",
-            ])
+            prompt_parts.extend(
+                [
+                    "## REJECTION FEEDBACK (this is a retry — fix these issues)",
+                    json.dumps(history_context["rejection_feedback"], indent=2),
+                    "",
+                ]
+            )
 
         # Layer-specific additions
         prompt_parts.extend(self._get_layer_specific_prompt_additions(target_context))
 
-        prompt_parts.extend([
-            "",
-            "## Required Output Format",
-            "Return a JSON object with EXACTLY these fields:",
-            "```json",
-            '{',
-            '  "file_path": "tests/<layer>/test_<module>_<fn>_<layer>.<ext>",',
-            '  "framework": "<framework>",',
-            '  "confidence": <0.0-1.0>,',
-            '  "reasoning": "<2-3 sentence layer-specific analysis>",',
-            '  "history_used": "none|reused_pass|diff_from_prior|avoided_known_failures",',
-            '  "fixtures_reused": ["<fixture_key>", ...],',
-            '  "fixtures_registered": ["<new_fixture_key>", ...],',
-            '  "coverage_intent": {',
-            '    "layer_target": "<coverage goal>",',
-            '    "branches_covered": ["<branch>", ...],',
-            '    "known_gaps": ["<gap and reason>", ...]',
-            '  },',
-            '  "mocks_required": [',
-            '    {"module": "<path>", "mock_type": "<type>", "from_registry": true|false}',
-            '  ],',
-            '  "quality_flags": ["<flag>", ...]',
-            "}",
-            "```",
-            "",
-            "## Test Code Generation",
-            "AFTER the JSON block, provide the complete, valid, executable test file in a standard markdown code block (e.g. ```python).",
-            "CRITICAL: Do NOT put the test_code inside the JSON object! It must be completely outside the JSON block.",
-            "CRITICAL: Keep the test cases extremely concise and limit the total number of tests to avoid exceeding output token limits.",
-            "Include all imports, all setup/teardown, and all test cases.",
-            "Use AAA (Arrange-Act-Assert) structure for every test.",
-        ])
+        prompt_parts.extend(
+            [
+                "",
+                "## Required Output Format",
+                "Return a JSON object with EXACTLY these fields:",
+                "```json",
+                "{",
+                '  "file_path": "tests/<layer>/test_<module>_<fn>_<layer>.<ext>",',
+                '  "framework": "<framework>",',
+                '  "confidence": <0.0-1.0>,',
+                '  "reasoning": "<2-3 sentence layer-specific analysis>",',
+                '  "history_used": "none|reused_pass|diff_from_prior|avoided_known_failures",',
+                '  "fixtures_reused": ["<fixture_key>", ...],',
+                '  "fixtures_registered": ["<new_fixture_key>", ...],',
+                '  "coverage_intent": {',
+                '    "layer_target": "<coverage goal>",',
+                '    "branches_covered": ["<branch>", ...],',
+                '    "known_gaps": ["<gap and reason>", ...]',
+                "  },",
+                '  "mocks_required": [',
+                '    {"module": "<path>", "mock_type": "<type>", "from_registry": true|false}',
+                "  ],",
+                '  "quality_flags": ["<flag>", ...]',
+                "}",
+                "```",
+                "",
+                "## Test Code Generation",
+                "AFTER the JSON block, provide the complete, valid, executable test file in a standard markdown code block (e.g. ```python).",
+                "CRITICAL: Do NOT put the test_code inside the JSON object! It must be completely outside the JSON block.",
+                "CRITICAL: Keep the test cases extremely concise and limit the total number of tests to avoid exceeding output token limits.",
+                "Include all imports, all setup/teardown, and all test cases.",
+                "Use AAA (Arrange-Act-Assert) structure for every test.",
+            ]
+        )
 
         return "\n".join(prompt_parts)
 
-    def _get_layer_specific_prompt_additions(
-        self, target_context: dict[str, Any]
-    ) -> list[str]:
+    def _get_layer_specific_prompt_additions(self, target_context: dict[str, Any]) -> list[str]:
         """Override in subclasses to add layer-specific prompt sections."""
         return []
 
@@ -333,7 +342,8 @@ class BaseLayerAgent(ABC):
         """Parse the LLM's JSON output, with fallback handling."""
         json_str = _extract_json_object(raw_output)
         try:
-            parsed = json.loads(json_str)
+            from typing import cast
+            parsed = cast("dict[str, Any]", json.loads(json_str))
             parsed["target_file"] = state.get("target_file", "unknown")
             parsed["active_layer"] = self.layer.value
 
@@ -345,18 +355,16 @@ class BaseLayerAgent(ABC):
         except json.JSONDecodeError:
             # Fallback: extract test code from response and build minimal output
             logger.info(
-                f"M5-{self.layer.value}: Failed to parse JSON output, "
-                f"using generated code fallback"
+                f"M5-{self.layer.value}: Failed to parse JSON output, using generated code fallback"
             )
             return self._create_fallback_output(raw_output, state)
 
-    def _create_fallback_output(
-        self, raw_output: str, state: ATLASState
-    ) -> dict[str, Any]:
+    def _create_fallback_output(self, raw_output: str, state: ATLASState) -> dict[str, Any]:
         """Create output when JSON parsing fails — extracts test code directly."""
         test_code = _extract_last_code_block(raw_output)
         if not test_code and '"test_code"' in raw_output:
             import re
+
             # Extract everything between "test_code": " and the next JSON key or end of JSON
             match = re.search(r'"test_code"\s*:\s*"(.*?)"\s*,\s*"\w+"\s*:', raw_output, re.DOTALL)
             if match:
@@ -364,7 +372,9 @@ class BaseLayerAgent(ABC):
                 extracted = match.group(1)
                 # Only unescape if it looks like it was escaped
                 if "\\n" in extracted or '\\"' in extracted:
-                    extracted = extracted.replace('\\n', '\n').replace('\\"', '"').replace('\\\\', '\\')
+                    extracted = (
+                        extracted.replace("\\n", "\n").replace('\\"', '"').replace("\\\\", "\\")
+                    )
                 test_code = extracted.strip()
             else:
                 # Prevent returning raw JSON as python code
@@ -376,10 +386,15 @@ class BaseLayerAgent(ABC):
         target_file = state.get("target_file", "unknown")
         language = state.get("project_context", {}).get("language", "python")
         ext = {"python": "py", "typescript": "ts", "javascript": "js"}.get(language, "py")
-        
+
         # Use filename as module name
         import os
-        module_name = os.path.splitext(os.path.basename(target_file))[0] if target_file != "unknown" else "unknown"
+
+        module_name = (
+            os.path.splitext(os.path.basename(target_file))[0]
+            if target_file != "unknown"
+            else "unknown"
+        )
 
         return {
             "target_file": target_file,
@@ -431,7 +446,7 @@ class BaseLayerAgent(ABC):
 
         # Build disk_write payload using the file_path generated by the agent or fallback
         test_file_path = test_output.get("file_path", target_file)
-        
+
         disk_write: dict[str, Any] = {
             "file_path": test_file_path,
             "content": test_output.get("test_code", ""),
@@ -453,8 +468,8 @@ def _extract_last_code_block(raw_output: str) -> str:
     """Return the last non-JSON fenced code block from an LLM response."""
     blocks = re.findall(r"```([a-zA-Z0-9_+-]*)\s*\n(.*?)```", raw_output, flags=re.DOTALL)
     for language, code in reversed(blocks):
-        if language.lower() != "json":
-            return code.strip()
+        if str(language).lower() != "json":
+            return str(code).strip()
     return ""
 
 

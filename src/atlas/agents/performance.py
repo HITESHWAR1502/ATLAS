@@ -8,6 +8,7 @@ and N+1 query problems.
 
 from __future__ import annotations
 
+from typing import Any
 from atlas.agents.layers.base import BaseLayerAgent
 from atlas.state import TestLayer
 
@@ -96,7 +97,7 @@ Return a JSON object with the exact structure specified.
 Include p50_budget_ms, p95_budget_ms, concurrency_target, n1_detected.
 """
 
-    def _get_layer_specific_prompt_additions(self, target_context: dict) -> list[str]:
+    def _get_layer_specific_prompt_additions(self, target_context: dict[str, Any]) -> list[str]:
         deps = target_context.get("dependencies", [])
         complexity = target_context.get("cyclomatic_complexity", 1)
 
@@ -111,12 +112,14 @@ Include p50_budget_ms, p95_budget_ms, concurrency_target, n1_detected.
         ]
 
         if "database" in deps:
-            additions.extend([
-                "",
-                "## N+1 Query Detection Required",
-                "- Mock DB to count query invocations",
-                "- Assert O(1) queries for batch operations",
-                "- Flag if N queries detected for N-item input",
-            ])
+            additions.extend(
+                [
+                    "",
+                    "## N+1 Query Detection Required",
+                    "- Mock DB to count query invocations",
+                    "- Assert O(1) queries for batch operations",
+                    "- Flag if N queries detected for N-item input",
+                ]
+            )
 
         return additions

@@ -7,6 +7,7 @@ Verifies complete business workflows, domain rule enforcement, and feature-level
 
 from __future__ import annotations
 
+from typing import Any
 from atlas.agents.layers.base import BaseLayerAgent
 from atlas.state import TestLayer
 
@@ -85,7 +86,7 @@ Return a JSON object with the exact structure specified in the prompt.
 Include business_domain, user_scenarios, and domain_rules_covered.
 """
 
-    def _get_layer_specific_prompt_additions(self, target_context: dict) -> list[str]:
+    def _get_layer_specific_prompt_additions(self, target_context: dict[str, Any]) -> list[str]:
         classification = target_context.get("classification", "")
         additions = [
             "",

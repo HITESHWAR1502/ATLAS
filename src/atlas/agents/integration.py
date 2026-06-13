@@ -7,6 +7,7 @@ database layer, message queues, cache, internal service clients.
 
 from __future__ import annotations
 
+from typing import Any
 from atlas.agents.layers.base import BaseLayerAgent
 from atlas.state import TestLayer
 
@@ -50,24 +51,18 @@ Verify the data contract between this function and its dependencies.
 - MUST cover: successful data retrieval/persistence, error handling from the dependency, timeout/latency scenarios.ut
   * Data contract mismatch (wrong schema returned)
   * Transaction rollback behaviour
-- For Neon/Postgres: use pg-mem (JS) or pytest-postgresql (Python)
-  OR a Neon branch database connection via environment
+- For databases: use in-memory DBs like pg-mem or testcontainers
 - Verify data persistence: assert DB state matches expected after function
 
-## Neon-Specific Integration Patterns
-If source uses @neondatabase/serverless (JS/TS):
-  - Inject Neon branch URL via env: process.env.DATABASE_URL = process.env.TEST_NEON_BRANCH_URL
-  - If branch not available, fall back to pg-mem and flag:
-    quality_flags: ["INTEGRATION_DOWNGRADED_TO_MOCK — neon branch unavailable"]
-
-If source uses asyncpg/psycopg2 (Python):
-  - Use pytest-postgresql fixture for local Postgres
+## Database Integration Patterns
+If source uses an SQL database:
+  - Use in-memory DBs or Testcontainers to spin up a local instance
   - Apply schema migrations before tests
 
 ## Framework Mapping
-- JavaScript/TypeScript → Jest + pg-mem OR Neon branch
-- Python → PyTest + pytest-postgresql OR asyncpg test utils
-- Java → JUnit 5 + Testcontainers (Postgres)
+- JavaScript/TypeScript → Jest + pg-mem or equivalent
+- Python → PyTest + pytest-postgresql or testcontainers
+- Java → JUnit 5 + Testcontainers
 
 ## Naming Convention
 "[functionName] should [data outcome] when [dependency state]"
@@ -84,10 +79,10 @@ Use realistic schema data — correct column types, FK-valid values.
 
 ## Output Format
 Return a JSON object with the exact structure specified in the prompt.
-Include dependency_map in the output for Neon tracking.
+
 """
 
-    def _get_layer_specific_prompt_additions(self, target_context: dict) -> list[str]:
+    def _get_layer_specific_prompt_additions(self, target_context: dict[str, Any]) -> list[str]:
         additions = [
             "",
             "## Integration-Specific Instructions",
@@ -100,13 +95,15 @@ Include dependency_map in the output for Neon tracking.
 
         deps = target_context.get("dependencies", [])
         if "database" in deps:
-            additions.extend([
-                "",
-                "## Database Integration",
-                "- Set up test database with correct schema",
-                "- Seed required test data before each test",
-                "- Assert database state after function execution",
-                "- Clean up test data in teardown",
-            ])
+            additions.extend(
+                [
+                    "",
+                    "## Database Integration",
+                    "- Set up test database with correct schema",
+                    "- Seed required test data before each test",
+                    "- Assert database state after function execution",
+                    "- Clean up test data in teardown",
+                ]
+            )
 
         return additions

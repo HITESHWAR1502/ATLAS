@@ -7,6 +7,7 @@ Verifies internal logic, branching, return values, and error handling.
 
 from __future__ import annotations
 
+from typing import Any
 from atlas.agents.layers.base import BaseLayerAgent
 from atlas.state import TestLayer
 
@@ -64,8 +65,8 @@ Example: "hashPassword should return bcrypt hash when valid password given"
 Use synthetic, minimal data: test@example.com, user-id-001
 Test data should be simple and focused on the logic being tested.
 
-## Neon/Postgres Mocking Strategy
-If the function uses Neon/Postgres, mock at the DRIVER level:
+## Database Mocking Strategy
+If the function accesses a database, mock at the DRIVER level:
 - Mock the entire database client/pool
 - Return hardcoded mock data
 - Verify query shapes and parameters
@@ -82,7 +83,7 @@ Use AAA (Arrange-Act-Assert) for every test case.
 One behaviour per test. Async/await where the function is async.
 """
 
-    def _get_layer_specific_prompt_additions(self, target_context: dict) -> list[str]:
+    def _get_layer_specific_prompt_additions(self, target_context: dict[str, Any]) -> list[str]:
         """Add unit-specific prompt sections."""
         additions = [
             "",
@@ -96,10 +97,12 @@ One behaviour per test. Async/await where the function is async.
 
         deps = target_context.get("dependencies", [])
         if deps:
-            additions.extend([
-                "",
-                f"## Dependencies to Mock: {', '.join(deps)}",
-                "Generate complete mock implementations for each dependency.",
-            ])
+            additions.extend(
+                [
+                    "",
+                    f"## Dependencies to Mock: {', '.join(deps)}",
+                    "Generate complete mock implementations for each dependency.",
+                ]
+            )
 
         return additions

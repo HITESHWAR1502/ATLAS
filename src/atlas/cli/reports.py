@@ -1,5 +1,8 @@
 """Final Report screens."""
+
 from textual.screen import Screen
 
-class FinalReportScreen(Screen):
+
+from typing import Any
+class FinalReportScreen(Screen[Any]):
     pass

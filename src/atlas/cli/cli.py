@@ -67,13 +67,13 @@ def run(ctx: click.Context, env: str | None) -> None:
         from InquirerPy import inquirer
         from InquirerPy.base.control import Choice
 
-        repo_path = inquirer.filepath(
+        repo_path = inquirer.filepath(  # type: ignore[attr-defined]
             message="Enter the target file path or repository path:",
             default="./",
             validate=lambda result: len(result) > 0,
         ).execute()
 
-        selected_layers = inquirer.checkbox(
+        selected_layers = inquirer.checkbox(  # type: ignore[attr-defined]
             message="Select testing layers:",
             choices=[
                 Choice("UNIT", name="Unit testing", enabled=True),

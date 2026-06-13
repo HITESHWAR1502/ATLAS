@@ -36,7 +36,7 @@ from atlas.state import ATLASState
 logger = logging.getLogger(__name__)
 
 
-def build_graph(config: ATLASConfig) -> StateGraph:
+def build_graph(config: ATLASConfig) -> StateGraph:  # type: ignore[type-arg]
     """
     Build the complete ATLAS LangGraph StateGraph.
 
@@ -56,11 +56,12 @@ def build_graph(config: ATLASConfig) -> StateGraph:
 
     # Upstream pipeline (M0–M4) — synchronous/async nodes with injected dependencies
     graph.add_node("m0_git_diff", m0_git_diff_filter)
-    
+
     async def m1_ingestion_node(state: ATLASState) -> ATLASState:
         return await m1_ingestion(state, config)
+
     graph.add_node("m1_ingestion", m1_ingestion_node)
-    
+
     graph.add_node("m2_ast_parser", m2_ast_parser)
     graph.add_node("m4_test_planner", m4_test_planner)
 
@@ -76,11 +77,12 @@ def build_graph(config: ATLASConfig) -> StateGraph:
 
     # Execution + Validation
     graph.add_node("m6_test_executor", m6_test_executor)
-    
+
     async def m7_disk_writer_node(state: ATLASState) -> ATLASState:
         return await m7_disk_writer(state)
+
     graph.add_node("m7_disk_writer", m7_disk_writer_node)
-    
+
     graph.add_node("m8_coverage", m8_coverage_runner)
 
     graph.add_node("task_dispatcher", task_dispatcher)
@@ -106,7 +108,14 @@ def build_graph(config: ATLASConfig) -> StateGraph:
     graph.add_conditional_edges(
         "task_dispatcher",
         route_from_dispatcher,
-        ["m5_unit", "m5_integration", "m5_functional", "m5_performance", "m5_owasp", "m7_disk_writer"]
+        [
+            "m5_unit",
+            "m5_integration",
+            "m5_functional",
+            "m5_performance",
+            "m5_owasp",
+            "m7_disk_writer",
+        ],
     )
 
     # ── Layer Agents -> Test Executor/Validator ──────────────────────────────
@@ -122,8 +131,8 @@ def build_graph(config: ATLASConfig) -> StateGraph:
         get_routing_verdict,
         {
             "task_dispatcher": "task_dispatcher",  # If PASS
-            "retry_handler": "retry_handler",      # If RETRY
-            "hitl_interrupt": "hitl_interrupt",    # If ESCALATE
+            "retry_handler": "retry_handler",  # If RETRY
+            "hitl_interrupt": "hitl_interrupt",  # If ESCALATE
         },
     )
 
@@ -138,13 +147,15 @@ def build_graph(config: ATLASConfig) -> StateGraph:
     graph.add_conditional_edges(
         "retry_handler",
         route_from_dispatcher,
-        ["m5_unit", "m5_integration", "m5_functional", "m5_performance", "m5_owasp"]
+        ["m5_unit", "m5_integration", "m5_functional", "m5_performance", "m5_owasp"],
     )
 
     return graph
 
 
-async def _wrap_async(fn, state, *args):
+from typing import Any, Callable
+
+async def _wrap_async(fn: Callable[..., Any], state: ATLASState, *args: Any) -> Any:
     """Wrap async functions for LangGraph nodes that need dependency injection."""
     return await fn(state, *args)
 
@@ -190,9 +201,10 @@ def task_dispatcher(state: ATLASState) -> ATLASState:
 
     import os
     import time
+
     provider = os.getenv("LLM_PROVIDER", "gemini").lower()
     model = os.getenv("LLM_MODEL", "gemini-2.5-flash").lower()
-    
+
     # Check if this isn't the very first task being popped (by checking if original queue size matches)
     # We add a delay to respect the Gemini free tier 5 RPM limit
     if provider == "gemini" and "2.5" in model:
@@ -201,16 +213,18 @@ def task_dispatcher(state: ATLASState) -> ATLASState:
 
     task = queue.pop(0)
     logger.info(f"DISPATCHER: Popping task for {task['layer']} targeting {task['target_file']}")
-    
+
     # Clear previous messages so the LLM doesn't reuse test code from the previous function
-    clear_msgs = [RemoveMessage(id=m.id) for m in state.get("messages", []) if hasattr(m, "id") and m.id]
-    
+    clear_msgs = [
+        RemoveMessage(id=m.id) for m in state.get("messages", []) if hasattr(m, "id") and m.id
+    ]
+
     return {
         "target_file": task["target_file"],
         "active_layer": task["layer"],
         "target_context": task["target_context"],
         "attempt": 1,
-        "messages": clear_msgs,
+        "messages": clear_msgs,  # type: ignore[typeddict-item]
         "execution_queue": queue,
     }
 
@@ -239,7 +253,7 @@ def _retry_handler(state: ATLASState) -> ATLASState:
     }
 
 
-def create_initial_state(project_root: str, selected_layers: list[str] = None) -> ATLASState:
+def create_initial_state(project_root: str, selected_layers: list[str] | None = None) -> ATLASState:
     """Create the initial state for a pipeline run."""
     run_id = str(uuid.uuid4())
     thread_id = f"atlas-{run_id[:8]}"

@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 @dataclass(frozen=True)
 class LLMConfig:
     """LLM provider configuration (Google Gemini)."""
+
     api_key: str
     model: str = "gemini-2.5-flash"
     embedding_model: str = "models/text-embedding-004"
@@ -24,6 +25,7 @@ class LLMConfig:
 @dataclass(frozen=True)
 class ATLASSettings:
     """ATLAS pipeline settings."""
+
     max_retries: int = 3
     hitl_enabled: bool = True
     log_level: str = "INFO"
@@ -48,6 +50,7 @@ class ATLASSettings:
 @dataclass
 class ATLASConfig:
     """Root configuration container — aggregates all sub-configs."""
+
     llm: LLMConfig
     settings: ATLASSettings
     project_root: Path = field(default_factory=lambda: Path.cwd())
@@ -67,8 +70,7 @@ class ATLASConfig:
         google_api_key = os.environ.get("GOOGLE_API_KEY", "")
         if not google_api_key:
             raise ValueError(
-                "GOOGLE_API_KEY is required. "
-                "Get one from https://aistudio.google.com/apikey"
+                "GOOGLE_API_KEY is required. Get one from https://aistudio.google.com/apikey"
             )
 
         return cls(
@@ -86,5 +88,5 @@ class ATLASConfig:
 
     def validate(self) -> list[str]:
         """Validate configuration and return list of warnings."""
-        warnings = []
+        warnings: list[str] = []
         return warnings

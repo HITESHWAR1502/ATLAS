@@ -1,5 +1,8 @@
 """Settings configuration UI."""
+
 from textual.screen import Screen
 
-class SettingsScreen(Screen):
+
+from typing import Any
+class SettingsScreen(Screen[Any]):
     pass
