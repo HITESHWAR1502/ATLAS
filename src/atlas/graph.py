@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from typing import Any, Callable
 
 from langgraph.graph import END, StateGraph
 
@@ -152,8 +153,6 @@ def build_graph(config: ATLASConfig) -> StateGraph:  # type: ignore[type-arg]
 
     return graph
 
-
-from typing import Any, Callable
 
 async def _wrap_async(fn: Callable[..., Any], state: ATLASState, *args: Any) -> Any:
     """Wrap async functions for LangGraph nodes that need dependency injection."""

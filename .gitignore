@@ -26,6 +26,10 @@ env/
 htmlcov/
 .pytest_cache/
 
+# Static analysis caches
+.ruff_cache/
+.mypy_cache/
+
 # OS
 .DS_Store
 Thumbs.db
