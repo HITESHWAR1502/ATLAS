@@ -84,7 +84,22 @@ TEST_FRAMEWORK_MAP = {
 
 def _detect_language(project_root: Path) -> str:
     """Detect primary project language."""
+    import os
     scores: dict[str, int] = {}
+    exclude_dirs = ["node_modules", ".venv", "venv", ".git", "__pycache__", "dist", "build"]
+
+    # Pre-count all extensions in one fast walk
+    ext_counts = {ext: 0 for ind in LANGUAGE_INDICATORS.values() for ext in ind["extensions"]}
+    for root, dirs, files in os.walk(project_root):
+        dirs[:] = [d for d in dirs if d not in exclude_dirs]
+        for file in files:
+            for ext in ext_counts:
+                if file.endswith(ext):
+                    ext_counts[ext] += 1
+                    break
+        # Stop early if we have enough of everything
+        if all(c >= 50 for c in ext_counts.values()):
+            break
 
     for lang, indicators in LANGUAGE_INDICATORS.items():
         score = 0
@@ -95,8 +110,7 @@ def _detect_language(project_root: Path) -> str:
 
         # Count source files
         for ext in indicators["extensions"]:
-            count = len(list(project_root.rglob(f"*{ext}")))
-            score += min(count, 50)  # Cap at 50 to avoid huge repos skewing
+            score += min(ext_counts[ext], 50)
 
         if score > 0:
             scores[lang] = score
@@ -142,15 +156,22 @@ def _detect_framework(project_root: Path, language: str) -> str | None:
 def _detect_test_framework(project_root: Path, language: str) -> str:
     """Detect existing test framework."""
     frameworks = TEST_FRAMEWORK_MAP.get(language, {})
+    import os
+    exclude_dirs = ["node_modules", ".venv", "venv", ".git", "__pycache__", "dist", "build"]
 
     # Scan test files and config for clues
     test_content = ""
-    for pattern in ["test_*", "*_test.*", "*.test.*", "*.spec.*", "conftest.py"]:
-        for f in project_root.rglob(pattern):
-            try:
-                test_content += f.read_text(encoding="utf-8", errors="replace")[:2000]
-            except Exception:
-                pass
+    for root, dirs, files in os.walk(project_root):
+        dirs[:] = [d for d in dirs if d not in exclude_dirs]
+        for file in files:
+            if file.startswith("test_") or "_test." in file or ".test." in file or ".spec." in file or file == "conftest.py":
+                try:
+                    fpath = Path(root) / file
+                    test_content += fpath.read_text(encoding="utf-8", errors="replace")[:2000]
+                except Exception:
+                    pass
+        if len(test_content) > 50000:
+            break
 
     # Also check package config
     for config_name in ["package.json", "pyproject.toml", "pom.xml"]:

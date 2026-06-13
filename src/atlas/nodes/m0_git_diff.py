@@ -194,20 +194,27 @@ def m0_git_diff_filter(state: ATLASState) -> ATLASState:
 
 def _scan_all_sources(project_root: Path) -> tuple[list[str], list[dict[str, Any]]]:
     """Fallback: scan all source files in the project."""
+    import os
     changed_files: list[str] = []
     diff_hunks: list[dict[str, Any]] = []
 
-    for ext in SOURCE_EXTENSIONS:
-        for file_path in project_root.rglob(f"*{ext}"):
-            rel_path = str(file_path.relative_to(project_root))
-            if _is_source_file(rel_path):
-                changed_files.append(rel_path)
-                diff_hunks.append(
-                    {
-                        "file": rel_path,
-                        "change_type": "A",
-                        "hunks": [],
-                    }
-                )
+    for root, dirs, files in os.walk(project_root):
+        # Modify dirs in-place to skip excluded directories
+        dirs[:] = [d for d in dirs if not any(pat.strip("/") in d for pat in EXCLUDE_PATTERNS)]
+        
+        for file in files:
+            path = Path(root) / file
+            if path.suffix in SOURCE_EXTENSIONS:
+                try:
+                    rel_path = str(path.relative_to(project_root)).replace("\\", "/")
+                    if _is_source_file(rel_path):
+                        changed_files.append(rel_path)
+                        diff_hunks.append({
+                            "file": rel_path,
+                            "change_type": "A",
+                            "hunks": [],
+                        })
+                except ValueError:
+                    pass
 
     return changed_files, diff_hunks
