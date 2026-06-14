@@ -44,8 +44,9 @@ Test the function in COMPLETE ISOLATION. Every dependency is mocked.
 Verify the function's internal logic, branching, return values, and
 error handling independent of any external system.
 
+
 ## Test Case Requirements
-- Minimum 2, maximum 5 test cases TOTAL for the entire file.
+- Minimum 2, maximum 10 test cases TOTAL for the entire file.
 - MUST cover: happy path, edge cases, error path for the most critical logic.
 - 100% of external dependencies mocked (DB, HTTP, FS, time, random)
 - Assertions: exact return value equality, specific error type + message,

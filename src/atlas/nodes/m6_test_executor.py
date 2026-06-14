@@ -107,24 +107,34 @@ def m6_test_executor(state: ATLASState) -> ATLASState:
             stderr = result.stderr
             return_code = result.returncode
 
+            # Parse and log tabular report
+            report_table = _format_test_report(stdout)
+            if report_table:
+                logger.info(f"\n{report_table}\n")
+
             if return_code == 0:
                 verdict = "PASS"
                 rejection_feedback = None
                 logger.info(f"M6: {active_layer} test PASSED. Skipping summarization.")
             else:
-                verdict = "RETRY"
                 failure_reason = _extract_pytest_failure(stdout, stderr)
-                rejection_feedback = _build_rejection_feedback(
-                    active_layer=active_layer,
-                    target_file=target_file,
-                    stdout=stdout,
-                    stderr=stderr,
-                    failure_reason=failure_reason,
-                )
-                logger.warning(
-                    "M6: %s test FAILED. Returning deterministic retry feedback.",
-                    active_layer,
-                )
+                if "AssertionError" in failure_reason:
+                    verdict = "FAIL"
+                    rejection_feedback = None
+                    logger.warning(f"M6: {active_layer} test caught a bug (AssertionError). Keeping test and failing it in the report.")
+                else:
+                    verdict = "RETRY"
+                    rejection_feedback = _build_rejection_feedback(
+                        active_layer=active_layer,
+                        target_file=target_file,
+                        stdout=stdout,
+                        stderr=stderr,
+                        failure_reason=failure_reason,
+                    )
+                    logger.warning(
+                        "M6: %s test FAILED. Returning deterministic retry feedback.",
+                        active_layer,
+                    )
 
             execution_result = {
                 "status": verdict,
@@ -184,6 +194,33 @@ def m6_test_executor(state: ATLASState) -> ATLASState:
                     "attempt": state.get("attempt", 1),
                 },
             }
+
+
+def _format_test_report(stdout: str) -> str:
+    """Parses pytest verbose output and formats it as an ASCII table."""
+    results = []
+    pattern = re.compile(r"::([^\s]+)\s+(PASSED|FAILED|ERROR|SKIPPED|XFAIL|XPASS)")
+    for line in stdout.splitlines():
+        # Remove ANSI escape codes
+        clean_line = re.sub(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])', '', line)
+        match = pattern.search(clean_line)
+        if match:
+            test_name, status = match.groups()
+            results.append((test_name, status))
+            
+    if not results:
+        return ""
+        
+    report = []
+    report.append("-" * 22 + "Report" + "-" * 22 + "|")
+    report.append(f"| {'Test Function Name':<33} | {'Status':<10} |")
+    report.append("-" * 50 + "|")
+    for name, status in results:
+        name_disp = name if len(name) <= 33 else name[:30] + "..."
+        report.append(f"| {name_disp:<33} | {status:<10} |")
+    report.append("-" * 50 + "|")
+    
+    return "\n".join(report)
 
 
 def _extract_pytest_failure(stdout: str, stderr: str) -> str:
@@ -304,7 +341,7 @@ def get_routing_verdict(state: ATLASState) -> str:
     attempt = state.get("attempt", 1)
     max_retries = state.get("max_retries", 3)
 
-    if verdict == "PASS":
+    if verdict in ["PASS", "FAIL"]:
         return "task_dispatcher"
     elif verdict == "RETRY":
         if attempt < max_retries:
